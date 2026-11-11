@@ -1,0 +1,19 @@
+{
+    "cache": [],
+    "cacheMode": [],
+    "projectName": "SpeedLife",
+    "packageName": "com.touch.mobile.dark",
+    "versionHash": "abc123",
+    "rss": "",
+    "cdnCache": "https://example.com/mobile/cache",
+    "cdnLauncher": "https://example.com/mobile/launcher",
+    "filesContinue": ["settings.ini", "gta_sa.set", "svconfig.ini"],
+    "launcher": {
+        "appVersion": "0.0.16",
+        "name": "app-release.apk",
+        "hash": "",
+        "mtime": 0,
+        "bytes": 0
+    },
+    "servers": []
+}
