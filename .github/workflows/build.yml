@@ -17,24 +17,14 @@ jobs:
         run: |
           ls -la
           mkdir -p proj
-          unzip -q ./*.zip -d proj
-          G=$(find proj -maxdepth 3 -name gradlew | head -1)
+          unzip -q "$(ls ./*.zip | head -1)" -d proj
+          G=$(find proj -maxdepth 3 -name settings.gradle.kts | head -1)
           if [ -z "$G" ]; then
-            echo "gradlew not found. Files:"
+            echo "settings.gradle.kts not found. Files:"
             find proj -maxdepth 3 | head -60
             exit 1
           fi
           echo "PROJ=$(dirname "$G")" >> $GITHUB_ENV
-
-      - name: Download libGTASA from release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          mkdir -p "$PROJ/app/src/main/jniLibs/arm64-v8a" "$PROJ/app/src/main/jniLibs/armeabi-v7a"
-          gh release download libs --repo "${{ github.repository }}" --pattern "libGTASA_arm64.so" --dir /tmp/libs
-          gh release download libs --repo "${{ github.repository }}" --pattern "libGTASA_arm32.so" --dir /tmp/libs
-          cp /tmp/libs/libGTASA_arm64.so "$PROJ/app/src/main/jniLibs/arm64-v8a/libGTASA.so"
-          cp /tmp/libs/libGTASA_arm32.so "$PROJ/app/src/main/jniLibs/armeabi-v7a/libGTASA.so"
 
       - uses: actions/setup-java@v4
         with:
@@ -44,13 +34,15 @@ jobs:
       - name: Accept Android licenses
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
 
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.9
+
       - name: Build APK
         working-directory: ${{ env.PROJ }}
-        run: |
-          chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon --stacktrace
+        run: gradle assembleDebug --no-daemon --stacktrace
 
       - uses: actions/upload-artifact@v4
         with:
-          name: launcher-apk
+          name: SpeedLife-apk
           path: ${{ env.PROJ }}/app/build/outputs/apk/debug/*.apk
