@@ -8,6 +8,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
+    timeout-minutes: 40
     permissions:
       contents: read
     steps:
@@ -46,3 +47,4 @@ jobs:
         with:
           name: SpeedLife-apk
           path: ${{ env.PROJ }}/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
