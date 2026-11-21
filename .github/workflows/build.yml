@@ -18,11 +18,12 @@ jobs:
 
       - name: Get AMX headers (the amx/amx.h in the zip is empty)
         run: |
-          git clone --depth 1 https://github.com/Zeex/samp-plugin-sdk.git /tmp/sdk
+          git clone --depth 1 https://github.com/udan11/samp-plugin-sdk.git /tmp/sdk
           SRC=$(dirname "$(find . -name makefile -not -path './.git/*' | head -1)")
           echo "Project folder: $SRC"
           mkdir -p "$SRC/amx"
           cp -r /tmp/sdk/amx/* "$SRC/amx/"
+          ls -l "$SRC/amx"; test -s "$SRC/amx/amx.h" && echo "amx.h OK"
           echo "SRC=$SRC" >> "$GITHUB_ENV"
 
       - name: Build
