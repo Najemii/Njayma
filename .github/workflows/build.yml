@@ -51,7 +51,7 @@ jobs:
         run: |
           cd "$SRC"
           ls -l amx
-          make AntiServerFullFix INCLUDE_DIRECTORIES="-I./ -I./amx"
+          make AntiServerFullFix INCLUDE_DIRECTORIES="-I./ -I./amx" COMPATIBILITY_FLAGS="-fshort-wchar -mfpmath=sse -msse2 -m32 -std=c++11"
           ls -l AntiServerFullFix.so
           file AntiServerFullFix.so
 
