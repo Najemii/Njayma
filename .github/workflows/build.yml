@@ -33,6 +33,12 @@ jobs:
           test "$found" = 1 || { echo "ERROR: amx/amx.h not found in any SDK repo"; exit 1; }
           mkdir -p "$SRC/amx"
           cp -r /tmp/sdk/amx/* "$SRC/amx/"
+          for h in sclinux.h osdefs.h getch.h; do
+            if [ ! -s "$SRC/amx/$h" ]; then
+              f=$(find /tmp/sdk -name "$h" | head -1)
+              [ -n "$f" ] && cp "$f" "$SRC/amx/"
+            fi
+          done
           ls -l "$SRC/amx"
           echo "SRC=$SRC" >> "$GITHUB_ENV"
 
@@ -44,7 +50,8 @@ jobs:
       - name: Build
         run: |
           cd "$SRC"
-          make AntiServerFullFix
+          ls -l amx
+          make AntiServerFullFix INCLUDE_DIRECTORIES="-I./ -I./amx"
           ls -l AntiServerFullFix.so
           file AntiServerFullFix.so
 
