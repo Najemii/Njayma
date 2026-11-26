@@ -1,78 +1,175 @@
 
-name: Extract Ryder Kraft APK
+name: Njayma APK Extract and Rebuild
 
 on:
   release:
     types: [published]
 
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Choose operation"
+        required: true
+        type: choice
+        options:
+          - extract
+          - rebuild
+        default: extract
+
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  extract:
+  build:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
       - name: Install tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y apktool unzip zip curl jq
+          sudo apt-get install -y apktool zip unzip jq
+          sudo apt-get install -y curl
 
-      - name: Download APK
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Select mode
+        id: mode
         run: |
-          gh release download "$GITHUB_REF_NAME" \
-            --repo "$GITHUB_REPOSITORY" \
-            --pattern "Ryder.Kraft.SA-MP.apk" \
-            --dir .
+          if [ "${{ github.event_name }}" = "release" ]; then
+            echo "value=extract" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=${{ inputs.mode }}" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Install JADX
+      - name: Download original APK
+        if: steps.mode.outputs.value == 'extract'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p input project output
+          gh release download vvi \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "NewlifeLauncherM.apk" \
+            --dir input
+
+          test -f input/NewlifeLauncherM.apk
+          cp input/NewlifeLauncherM.apk project/original.apk
+
+      - name: Download JADX
+        if: steps.mode.outputs.value == 'extract'
         run: |
           URL=$(curl -fsSL \
             https://api.github.com/repos/skylot/jadx/releases/latest \
             | jq -r '.assets[] |
-            select(.name | test("^jadx-[0-9].*\\.zip$")) |
-            .browser_download_url' | head -n 1)
+              select(.name | test("^jadx-.*\\.zip$")) |
+              .browser_download_url' | head -n 1)
 
           test -n "$URL"
           curl -fL "$URL" -o jadx.zip
-          unzip -q jadx.zip -d jadx-tool
+          mkdir jadx
+          unzip -q jadx.zip -d jadx
 
-          JADX=$(find jadx-tool -type f \
-            -path '*/bin/jadx' -print -quit)
-
-          chmod +x "$JADX"
-          echo "JADX=$JADX" >> "$GITHUB_ENV"
-
-      - name: Extract APKTool
+      - name: Extract APK resources and Smali
+        if: steps.mode.outputs.value == 'extract'
         run: |
-          mkdir -p output/apktool
-          apktool d -f "Ryder.Kraft.SA-MP.apk" \
-            -o output/apktool
+          apktool d -f project/original.apk \
+            -o project/apktool
 
-      - name: Extract JADX
+      - name: Decompile Java
+        if: steps.mode.outputs.value == 'extract'
         run: |
-          mkdir -p output/jadx
-          "$JADX" -d output/jadx \
-            "Ryder.Kraft.SA-MP.apk"
+          JADX=$(find jadx -type f -name jadx -perm -111 | head -n 1)
+          test -n "$JADX"
+          mkdir -p project/java
+          "$JADX" -d project/java project/original.apk
 
-      - name: Save original APK
+      - name: Create Source ZIP
+        if: steps.mode.outputs.value == 'extract'
         run: |
-          mkdir -p output/original
-          cp "Ryder.Kraft.SA-MP.apk" output/original/
+          zip -qr output/Njayma-Recovered-Source.zip project
+          ls -lh output/
 
-      - name: Create ZIP
+      - name: Upload Source ZIP to Release
+        if: steps.mode.outputs.value == 'extract'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "Decompiled APK project" > output/README.txt
-          zip -qr Ryder-Kraft-Source.zip output
+          gh release upload vvi \
+            output/Njayma-Recovered-Source.zip \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
 
-      - name: Upload ZIP
+      - name: Download Edited Source ZIP
+        if: steps.mode.outputs.value == 'rebuild'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p input
+          gh release download vvi \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "Njayma-Edited-Source.zip" \
+            --dir input
+
+          unzip -q input/Njayma-Edited-Source.zip
+
+          test -d project/apktool
+
+      - name: Rebuild APK
+        if: steps.mode.outputs.value == 'rebuild'
+        run: |
+          apktool b project/apktool \
+            -o app-unsigned.apk
+
+      - name: Sign APK
+        if: steps.mode.outputs.value == 'rebuild'
+        run: |
+          BT=$(find "$ANDROID_HOME/build-tools" \
+            -mindepth 1 -maxdepth 1 -type d \
+            | sort -V | tail -n 1)
+
+          keytool -genkeypair \
+            -keystore njayma.keystore \
+            -alias njayma \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -storepass android \
+            -keypass android \
+            -dname "CN=Njayma"
+
+          "$BT/zipalign" -f -p 4 \
+            app-unsigned.apk app-aligned.apk
+
+          "$BT/apksigner" sign \
+            --ks njayma.keystore \
+            --ks-key-alias njayma \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            --out Njayma-Modified.apk \
+            app-aligned.apk
+
+          "$BT/apksigner" verify Njayma-Modified.apk
+
+      - name: Upload Modified APK
+        if: steps.mode.outputs.value == 'rebuild'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload vvi \
+            Njayma-Modified.apk \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
+
+      - name: Save ZIP as Artifact
+        if: steps.mode.outputs.value == 'extract'
         uses: actions/upload-artifact@v4
         with:
-          name: Ryder-Kraft-Source
-          path: Ryder-Kraft-Source.zip
-          retention-days: 30
+          name: Njayma-Recovered-Source
+          path: output/Njayma-Recovered-Source.zip
