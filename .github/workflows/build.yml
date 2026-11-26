@@ -1,62 +1,78 @@
-name: Build AntiServerFullFix (Linux .so)
+
+name: Extract Ryder Kraft APK
 
 on:
-  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
 
 jobs:
-  build:
-    runs-on: ubuntu-22.04
+  extract:
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install 32-bit tools
+      - name: Install tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y g++-multilib gcc-multilib make
+          sudo apt-get install -y apktool unzip zip curl jq
 
-      - name: Get AMX headers (the amx/amx.h in the zip is empty)
+      - name: Download APK
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          SRC=$(dirname "$(find . -name makefile -not -path './.git/*' | head -1)")
-          echo "Project folder: $SRC"
-          found=0
-          for repo in Zeex/samp-plugin-sdk udan11/samp-plugin-sdk; do
-            rm -rf /tmp/sdk
-            git clone --depth 1 "https://github.com/$repo.git" /tmp/sdk || continue
-            if [ -s /tmp/sdk/amx/amx.h ]; then
-              echo "AMX headers found in $repo"
-              found=1
-              break
-            fi
-          done
-          test "$found" = 1 || { echo "ERROR: amx/amx.h not found in any SDK repo"; exit 1; }
-          mkdir -p "$SRC/amx"
-          cp -r /tmp/sdk/amx/* "$SRC/amx/"
-          for h in sclinux.h osdefs.h getch.h; do
-            if [ ! -s "$SRC/amx/$h" ]; then
-              f=$(find /tmp/sdk -name "$h" | head -1)
-              [ -n "$f" ] && cp "$f" "$SRC/amx/"
-            fi
-          done
-          ls -l "$SRC/amx"
-          echo "SRC=$SRC" >> "$GITHUB_ENV"
+          gh release download "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "Ryder.Kraft.SA-MP.apk" \
+            --dir .
 
-      - name: Remove the SELinux-disabling line
+      - name: Install JADX
         run: |
-          sed -i 's/system("setenforce 0");//' "$SRC/AntiServerFullAttack.cxx"
-          ! grep -n "setenforce" "$SRC/AntiServerFullAttack.cxx"
+          URL=$(curl -fsSL \
+            https://api.github.com/repos/skylot/jadx/releases/latest \
+            | jq -r '.assets[] |
+            select(.name | test("^jadx-[0-9].*\\.zip$")) |
+            .browser_download_url' | head -n 1)
 
-      - name: Build
+          test -n "$URL"
+          curl -fL "$URL" -o jadx.zip
+          unzip -q jadx.zip -d jadx-tool
+
+          JADX=$(find jadx-tool -type f \
+            -path '*/bin/jadx' -print -quit)
+
+          chmod +x "$JADX"
+          echo "JADX=$JADX" >> "$GITHUB_ENV"
+
+      - name: Extract APKTool
         run: |
-          cd "$SRC"
-          ls -l amx
-          make AntiServerFullFix INCLUDE_DIRECTORIES="-I./ -I./amx" COMPATIBILITY_FLAGS="-fshort-wchar -mfpmath=sse -msse2 -m32 -std=c++11"
-          ls -l AntiServerFullFix.so
-          file AntiServerFullFix.so
+          mkdir -p output/apktool
+          apktool d -f "Ryder.Kraft.SA-MP.apk" \
+            -o output/apktool
 
-      - name: Upload .so
+      - name: Extract JADX
+        run: |
+          mkdir -p output/jadx
+          "$JADX" -d output/jadx \
+            "Ryder.Kraft.SA-MP.apk"
+
+      - name: Save original APK
+        run: |
+          mkdir -p output/original
+          cp "Ryder.Kraft.SA-MP.apk" output/original/
+
+      - name: Create ZIP
+        run: |
+          echo "Decompiled APK project" > output/README.txt
+          zip -qr Ryder-Kraft-Source.zip output
+
+      - name: Upload ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: AntiServerFullFix
-          path: ${{ env.SRC }}/AntiServerFullFix.so
+          name: Ryder-Kraft-Source
+          path: Ryder-Kraft-Source.zip
+          retention-days: 30
