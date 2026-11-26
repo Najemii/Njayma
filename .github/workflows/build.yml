@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: Setup Java
@@ -33,13 +33,12 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Install tools
+      - name: Install Tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y apktool zip unzip jq
-          sudo apt-get install -y curl
+          sudo apt-get install -y apktool zip unzip jq curl
 
-      - name: Select mode
+      - name: Select Operation
         id: mode
         run: |
           if [ "${{ github.event_name }}" = "release" ]; then
@@ -48,18 +47,20 @@ jobs:
             echo "value=${{ inputs.mode }}" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Download original APK
+      - name: Download Original APK
         if: steps.mode.outputs.value == 'extract'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p input project output
+
           gh release download vvi \
             --repo "$GITHUB_REPOSITORY" \
             --pattern "NewlifeLauncherM.apk" \
             --dir input
 
           test -f input/NewlifeLauncherM.apk
+
           cp input/NewlifeLauncherM.apk project/original.apk
 
       - name: Download JADX
@@ -72,29 +73,54 @@ jobs:
               .browser_download_url' | head -n 1)
 
           test -n "$URL"
+
           curl -fL "$URL" -o jadx.zip
+
           mkdir jadx
           unzip -q jadx.zip -d jadx
 
-      - name: Extract APK resources and Smali
+      - name: Extract APK Resources and Smali
         if: steps.mode.outputs.value == 'extract'
         run: |
           apktool d -f project/original.apk \
             -o project/apktool
 
+          echo "APK extraction completed."
+
       - name: Decompile Java
         if: steps.mode.outputs.value == 'extract'
         run: |
           JADX=$(find jadx -type f -name jadx -perm -111 | head -n 1)
+
           test -n "$JADX"
+
           mkdir -p project/java
-          "$JADX" -d project/java project/original.apk
+
+          "$JADX" \
+            --show-bad-code \
+            --escape-unicode \
+            -d project/java \
+            project/original.apk || {
+              echo "WARNING: JADX found errors."
+              echo "Keeping recovered Java files."
+            }
+
+          echo "JADX extraction finished."
+          echo "Recovered Java files:"
+          find project/java -type f | head -50
 
       - name: Create Source ZIP
         if: steps.mode.outputs.value == 'extract'
         run: |
-          zip -qr output/Njayma-Recovered-Source.zip project
+          mkdir -p output
+
+          zip -qr \
+            output/Njayma-Recovered-Source.zip \
+            project
+
           ls -lh output/
+
+          test -f output/Njayma-Recovered-Source.zip
 
       - name: Upload Source ZIP to Release
         if: steps.mode.outputs.value == 'extract'
@@ -106,12 +132,15 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --clobber
 
+          echo "Source ZIP uploaded successfully."
+
       - name: Download Edited Source ZIP
         if: steps.mode.outputs.value == 'rebuild'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p input
+
           gh release download vvi \
             --repo "$GITHUB_REPOSITORY" \
             --pattern "Njayma-Edited-Source.zip" \
@@ -121,13 +150,15 @@ jobs:
 
           test -d project/apktool
 
-      - name: Rebuild APK
+      - name: Rebuild Modified APK
         if: steps.mode.outputs.value == 'rebuild'
         run: |
           apktool b project/apktool \
             -o app-unsigned.apk
 
-      - name: Sign APK
+          test -f app-unsigned.apk
+
+      - name: Sign Modified APK
         if: steps.mode.outputs.value == 'rebuild'
         run: |
           BT=$(find "$ANDROID_HOME/build-tools" \
@@ -157,7 +188,7 @@ jobs:
 
           "$BT/apksigner" verify Njayma-Modified.apk
 
-      - name: Upload Modified APK
+      - name: Upload Modified APK to Release
         if: steps.mode.outputs.value == 'rebuild'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -167,9 +198,14 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --clobber
 
-      - name: Save ZIP as Artifact
-        if: steps.mode.outputs.value == 'extract'
+          echo "Modified APK uploaded."
+
+      - name: Save ZIP and APK Artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Njayma-Recovered-Source
-          path: output/Njayma-Recovered-Source.zip
+          name: Njayma-Workflow-Output
+          path: |
+            output/*.zip
+            Njayma-Modified.apk
+          if-no-files-found: ignore
